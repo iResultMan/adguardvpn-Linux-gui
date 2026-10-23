@@ -1,0 +1,30 @@
+# Optional: connect AdGuard VPN at boot, before anyone logs in.
+# The GUI does not need this; it is what the author uses so that the VPN is up
+# even on the login screen. Install as root:
+#   sed "s/YOUR_USER/$USER/" adguardvpn.service.example \
+#       | sudo tee /etc/systemd/system/adguardvpn.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now adguardvpn
+[Unit]
+Description=AdGuard VPN auto-connect
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# `connect` returns once the tunnel is up while the daemon keeps running, so
+# oneshot + RemainAfterExit mirrors the daemon state honestly (Type=simple
+# would show "inactive" with the tunnel still up).
+Type=oneshot
+RemainAfterExit=yes
+Environment=HOME=/home/YOUR_USER
+# No -l: the CLI reconnects to the last location used, the same one the
+# window shows. Pick a different one from the window and it sticks.
+ExecStart=/usr/local/bin/adguardvpn-cli connect -y --boot
+# The daemon is started by root here, but the CLI (and the GUI) run as the
+# desktop user. Hand the IPC socket over so `status` and `disconnect` talk to
+# the very same daemon.
+ExecStartPost=/usr/bin/chown YOUR_USER:YOUR_USER /home/YOUR_USER/.local/share/adguardvpn-cli/vpn.socket
+ExecStop=/usr/local/bin/adguardvpn-cli disconnect
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

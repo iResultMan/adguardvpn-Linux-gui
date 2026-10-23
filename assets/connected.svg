@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="trayG" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00FFA3"/>
+      <stop offset="100%" stop-color="#00D27A"/>
+    </linearGradient>
+  </defs>
+  <!-- Solid Sharp Shield Silhouette -->
+  <path d="M 32 7 L 53 16.5 L 53 33 C 53 46.5 32 58 32 58 C 32 58 11 46.5 11 33 L 11 16.5 Z" 
+        fill="none" stroke="url(#trayG)" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Concentric Glow Ring -->
+  <circle cx="32" cy="33.5" r="14.5" fill="none" stroke="#00FFA3" stroke-width="2.5" opacity="0.5"/>
+  <!-- Large Prominent Pulse Dot -->
+  <circle cx="32" cy="33.5" r="9" fill="#00FFA3"/>
+</svg>

@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdGuard VPN GUI для Linux</title>
+<meta name="description" content="Окно в трее над официальным adguardvpn-cli: состояние VPN, город, пинг и IP всегда перед глазами. Подключение в один клик. Ничего своего, только команды CLI.">
+<meta property="og:title" content="AdGuard VPN GUI для Linux">
+<meta property="og:description" content="Графическая оболочка над официальной консольной программой AdGuard VPN. Статус раз в 2 секунды, подключение в один клик.">
+<meta property="og:image" content="screenshot.png">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #111412;
+    --surface: #181c19;
+    --pane: #000000;
+    --ink: #eaeee9;
+    --ink-70: rgba(234, 238, 233, 0.74);
+    --ink-55: rgba(234, 238, 233, 0.56);
+    --line: rgba(234, 238, 233, 0.14);
+    --accent: #00e676;
+    --accent-ink: #0b1a10;
+    --ease: cubic-bezier(.22, 1, .36, 1);
+    --gutter: clamp(16px, 4vw, 56px);
+    --measure: 36rem;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Onest", system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 17px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+  h1, h2, h3 { font-weight: 300; margin: 0; text-wrap: balance; hyphens: none; }
+  h1 { font-size: clamp(2.6rem, 7vw, 6.4rem); line-height: 0.92; letter-spacing: -0.035em; }
+  h2 { font-size: clamp(1.7rem, 3.2vw, 2.7rem); line-height: 1.0; letter-spacing: -0.03em; overflow-wrap: anywhere; }
+  h3 { font-size: 1.35rem; line-height: 1.1; letter-spacing: -0.02em; }
+  p { margin: 0; max-width: var(--measure); }
+  p + p { margin-top: 1em; }
+  a { color: inherit; text-decoration-color: var(--ink-55); text-underline-offset: 0.18em; }
+  a:hover { text-decoration-color: var(--accent); }
+  strong { font-weight: 400; color: var(--ink); }
+  code, pre, kbd {
+    font-family: ui-monospace, "JetBrains Mono", "Fira Mono", Menlo, monospace;
+    font-size: 0.92em;
+  }
+  code, kbd {
+    background: var(--surface);
+    padding: 0.08em 0.4em;
+    border-radius: 4px;
+  }
+  pre {
+    margin: 0;
+    padding: 18px 20px;
+    background: var(--surface);
+    border-radius: 0;
+    overflow-x: auto;
+    line-height: 1.55;
+    max-width: 100%;
+  }
+  pre code { background: none; padding: 0; font-size: 0.95em; }
+  pre:focus-visible, a:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  .label {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-55);
+    line-height: 1.8;
+  }
+
+  /* ---------- hero: 60/40, text at the lower third, screenshot flush right ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    min-height: 100svh;
+  }
+  .hero__text {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: var(--gutter);
+    padding-bottom: clamp(32px, 7vh, 80px);
+    gap: 28px;
+  }
+  .hero__top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 22px var(--gutter);
+    font-size: 15px;
+  }
+  .hero__top nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 22px; }
+  .hero__top nav a { text-decoration: none; color: var(--ink-70); }
+  .hero__top nav a:hover { color: var(--ink); }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+  .brand img { width: 22px; height: 22px; }
+  .hero__sub { font-size: clamp(1.05rem, 1.6vw, 1.3rem); color: var(--ink-70); max-width: 30rem; }
+  .hero__cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 26px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: 16px;
+    transition: transform 620ms var(--ease), background-color 500ms var(--ease), color 320ms var(--ease);
+  }
+  .btn--fill { background: var(--accent); color: var(--accent-ink); }
+  .btn--fill:hover { background: #33eb8f; transform: translateY(-2px); }
+  .btn--ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn--ghost:hover { border-color: var(--ink-55); transform: translateY(-2px); }
+  .hero__note { font-size: 13px; color: var(--ink-55); flex-basis: 100%; }
+  .hero__pane {
+    background: var(--pane);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100svh;
+    padding: clamp(24px, 5vh, 64px) var(--gutter);
+  }
+  .hero__pane img {
+    width: min(100%, 360px);
+    height: auto;
+    display: block;
+    border-radius: 14px;
+  }
+
+  /* ---------- sections: label column + content column, hairline rows ---------- */
+  .section {
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) minmax(0, 3fr);
+    gap: 24px var(--gutter);
+    padding: clamp(48px, 8vh, 96px) var(--gutter);
+  }
+  .section__head h2 { margin-top: 10px; }
+  .section__body { min-width: 0; }
+  .section__body > * + * { margin-top: 28px; }
+
+  .rows { margin: 0; padding: 0; list-style: none; max-width: 48rem; }
+  .rows > div {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) 2fr;
+    gap: 16px;
+    padding: 14px 0;
+    border-top: 1px solid var(--line);
+  }
+  .rows > div:last-child { border-bottom: 1px solid var(--line); }
+  .rows dt, .rows .k { color: var(--ink); }
+  .rows dd, .rows .v { margin: 0; color: var(--ink-70); }
+  .rows dt code { overflow-wrap: anywhere; }
+
+  table { border-collapse: collapse; width: 100%; max-width: 52rem; font-size: 15.5px; }
+  th, td { text-align: left; padding: 12px 18px 12px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 400; color: var(--ink-55); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; border-top: 0; }
+  tr:last-child td { border-bottom: 1px solid var(--line); }
+  td code { white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; max-width: 48rem; }
+  ol.steps li { counter-increment: step; display: grid; grid-template-columns: 56px 1fr; gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); }
+  ol.steps li::before { content: counter(step, decimal-leading-zero); color: var(--ink-55); font-size: 14px; letter-spacing: 0.1em; padding-top: 4px; }
+  ol.steps li:last-child { border-bottom: 1px solid var(--line); }
+  ol.steps li > * + * { margin-top: 10px; }
+  ul.plain { margin: 0; padding-left: 1.1em; max-width: var(--measure); color: var(--ink-70); }
+  ul.plain li + li { margin-top: 8px; }
+
+  .quote {
+    font-size: clamp(1.25rem, 2.2vw, 1.7rem);
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    font-weight: 300;
+    max-width: 32rem;
+  }
+  .quote footer { font-size: 15px; color: var(--ink-55); margin-top: 14px; font-weight: 400; }
+
+  .foot {
+    border-top: 1px solid var(--line);
+    padding: 40px var(--gutter) 56px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 40px;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--ink-55);
+  }
+  .foot p { max-width: 40rem; }
+
+  /* ---------- entrance ---------- */
+  /* Entrance runs only when the inline script below opts in (JS on, motion
+     allowed); otherwise every element is simply visible. */
+  html.anim .in { opacity: 0; transform: translateY(28px); filter: blur(14px); animation: in 900ms var(--ease) forwards; }
+  html.anim .in:nth-child(1) { animation-delay: 300ms; }
+  html.anim .in:nth-child(2) { animation-delay: 420ms; }
+  html.anim .in:nth-child(3) { animation-delay: 540ms; }
+  html.anim .in:nth-child(4) { animation-delay: 660ms; }
+  html.anim .hero__pane img.in { animation-delay: 900ms; }
+  @keyframes in { to { opacity: 1; transform: none; filter: blur(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .btn { transition: none; }
+    html { scroll-behavior: auto; }
+  }
+
+  /* ---------- phone: one column, screenshot after the text ---------- */
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; min-height: 0; }
+    .hero__text { min-height: 100svh; padding-top: 96px; }
+    .hero__pane { min-height: 0; padding: 40px 16px; }
+    .hero__top { font-size: 14px; padding: 18px 16px; gap: 16px; align-items: flex-start; }
+    .hero__top nav { gap: 4px 14px; }
+    .brand { white-space: nowrap; }
+    .section { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .rows > div { grid-template-columns: 1fr; gap: 4px; }
+    ol.steps li { grid-template-columns: 40px 1fr; }
+    table { font-size: 14.5px; }
+    th, td { padding-right: 12px; }
+  }
+</style>
+<script>
+  if (matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+    document.documentElement.classList.add("anim");
+  }
+</script>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero__top">
+    <a class="brand" href="#"><img src="icon.png" alt="" width="22" height="22">AdGuard VPN GUI</a>
+    <nav aria-label="Разделы">
+      <a href="#why">Зачем</a>
+      <a href="#how">Устройство</a>
+      <a href="#install">Установка</a>
+      <a href="#help">Справка</a>
+    </nav>
+  </div>
+  <div class="hero__text">
+    <p class="label in">Linux / трей / официальный adguardvpn-cli</p>
+    <h1 class="in">AdGuard VPN<br>в&nbsp;трее Linux</h1>
+    <p class="hero__sub in">Окно над консольной программой AdGuard. Состояние, город, пинг и&nbsp;IP обновляются каждые 2&nbsp;секунды. Подключение в&nbsp;один клик, без терминала.</p>
+    <div class="hero__cta in">
+      <a class="btn btn--fill" href="https://github.com/iResultMan/adguardvpn-Linux-gui">Открыть репозиторий</a>
+      <a class="btn btn--ghost" href="#install">Как установить</a>
+      <span class="hero__note">Python 3 и&nbsp;PyQt5. Один файл, одна зависимость.</span>
+    </div>
+  </div>
+  <div class="hero__pane">
+    <img class="in" src="screenshot.png" width="340" height="560" alt="Окно AdGuard VPN GUI: подключено к Denver с пингом 177 мс, публичный IP, список из 80 локаций с пингами от 30 мс">
+  </div>
+</header>
+
+<main>
+
+<section class="section" id="why">
+  <div class="section__head">
+    <p class="label">Зачем</p>
+    <h2>У&nbsp;AdGuard VPN нет окна для&nbsp;Linux</h2>
+  </div>
+  <div class="section__body">
+    <blockquote class="quote">
+      Я не&nbsp;хочу помнить команды и&nbsp;держать терминал открытым, чтобы узнать, работает&nbsp;ли VPN. Состояние должно быть видно всегда, как&nbsp;заряд батареи.
+      <footer>автор проекта</footer>
+    </blockquote>
+    <p>На macOS и&nbsp;Windows у&nbsp;AdGuard есть приложения с&nbsp;окном. На&nbsp;Linux производитель даёт только консольную программу <code>adguardvpn-cli</code>: она надёжная, но&nbsp;чтобы увидеть, куда вы подключены, нужно набрать команду. Без VPN работать невозможно, и&nbsp;отвлекаться на&nbsp;проверку каждый раз тоже.</p>
+    <p>Эта оболочка решает одну задачу: иконка в&nbsp;трее показывает, поднят&nbsp;ли туннель, а&nbsp;окно по&nbsp;клику показывает город, пинг и&nbsp;публичный IP и&nbsp;даёт переключиться на&nbsp;другую локацию.</p>
+  </div>
+</section>
+
+<section class="section" id="what">
+  <div class="section__head">
+    <p class="label">Что в&nbsp;окне</p>
+    <h2>Всё, что отвечает на&nbsp;вопрос «а&nbsp;VPN сейчас работает?»</h2>
+  </div>
+  <div class="section__body">
+    <dl class="rows">
+      <div><dt>Состояние</dt><dd>подключено, отключено или подключается. Иконка в&nbsp;трее меняет цвет вместе с&nbsp;ним.</dd></div>
+      <div><dt>Город и&nbsp;пинг</dt><dd>к&nbsp;какой локации подключён туннель и&nbsp;с&nbsp;какой задержкой.</dd></div>
+      <div><dt>Публичный IP</dt><dd>адрес, который видят сайты, и&nbsp;его геолокация. Клик копирует IP в&nbsp;буфер.</dd></div>
+      <div><dt>Локации</dt><dd>80 с&nbsp;лишним городов с&nbsp;пингами, сортировка по&nbsp;пингу, поиск, избранное. Двойной клик подключает.</dd></div>
+      <div><dt>Исключения сайтов</dt><dd>список доменов, которые идут мимо VPN (или только через него в&nbsp;режиме SELECTIVE), добавление и&nbsp;удаление.</dd></div>
+      <div><dt>Аккаунт</dt><dd>вход через браузер, тариф, срок подписки, выход.</dd></div>
+      <div><dt>Мелочи</dt><dd>автозапуск при входе, русский и&nbsp;английский интерфейс, список локаций из&nbsp;кэша для мгновенного старта.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <div class="section__head">
+    <p class="label">Устройство</p>
+    <h2>Ничего своего. Только команды производителя</h2>
+  </div>
+  <div class="section__body">
+    <p>Оболочка не&nbsp;содержит VPN-логики и&nbsp;не&nbsp;трогает сеть. Фоновый поток раз в&nbsp;2&nbsp;секунды запускает <code>adguardvpn-cli status</code> и&nbsp;показывает ответ. Каждая кнопка в&nbsp;окне запускает ту&nbsp;же команду, которую вы набрали&nbsp;бы в&nbsp;терминале.</p>
+    <div class="table-wrap" tabindex="0">
+    <table>
+      <thead><tr><th scope="col">Действие в&nbsp;окне</th><th scope="col">Что выполняется</th></tr></thead>
+      <tbody>
+        <tr><td>Состояние и&nbsp;город, каждые 2&nbsp;с</td><td><code>adguardvpn-cli status</code></td></tr>
+        <tr><td>Аккаунт и&nbsp;тариф, каждые 30&nbsp;с</td><td><code>adguardvpn-cli license</code></td></tr>
+        <tr><td>Список локаций и&nbsp;пинги</td><td><code>adguardvpn-cli list-locations</code></td></tr>
+        <tr><td>Кнопка «Подключиться»</td><td><code>adguardvpn-cli connect -y</code></td></tr>
+        <tr><td>Двойной клик по&nbsp;локации</td><td><code>adguardvpn-cli connect -l "Город" -y</code></td></tr>
+        <tr><td>Кнопка «Отключиться»</td><td><code>adguardvpn-cli disconnect</code></td></tr>
+        <tr><td>Вход и&nbsp;выход</td><td><code>adguardvpn-cli login</code>, <code>adguardvpn-cli logout</code></td></tr>
+        <tr><td>Исключения сайтов</td><td><code>adguardvpn-cli site-exclusions show / add / remove / clear</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>Единственное исключение: публичный IP запрашивается по&nbsp;HTTPS у&nbsp;<code>ipwho.is</code>, при сбое у&nbsp;<code>ipapi.co</code>. CLI такой команды не&nbsp;даёт.</p>
+    <p>Если VPN поднят другим способом, например системным юнитом при загрузке, окно покажет и&nbsp;это: оно читает состояние того&nbsp;же демона, что и&nbsp;CLI.</p>
+  </div>
+</section>
+
+<section class="section" id="install">
+  <div class="section__head">
+    <p class="label">Установка</p>
+    <h2>Три команды и&nbsp;одно расширение для&nbsp;GNOME</h2>
+  </div>
+  <div class="section__body">
+    <p>Нужны Linux, Python&nbsp;3.8 или новее с&nbsp;модулем <code>venv</code>, установленный и&nbsp;авторизованный <a href="https://github.com/AdguardTeam/AdGuardVPNCLI">AdGuard VPN CLI</a> и&nbsp;трей в&nbsp;панели.</p>
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>Скачать и&nbsp;установить</h3>
+          <pre tabindex="0"><code>git clone https://github.com/iResultMan/adguardvpn-Linux-gui.git
+cd adguardvpn-Linux-gui
+./install.sh</code></pre>
+          <p>Скрипт создаёт <code>venv</code> с&nbsp;PyQt5, ярлык в&nbsp;меню приложений, иконки и&nbsp;автозапуск. Автозапуск потом выключается флажком в&nbsp;окне.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>GNOME: включить трей</h3>
+          <p>В&nbsp;GNOME Shell трея нет. Поставьте расширение AppIndicator: пакет <code>gnome-shell-extension-appindicator</code> в&nbsp;Ubuntu, Debian и&nbsp;Fedora. KDE, Xfce, Cinnamon, MATE и&nbsp;LXQt работают без дополнений.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Запустить</h3>
+          <pre tabindex="0"><code>venv/bin/python AdGuard.py</code></pre>
+          <p>Или из&nbsp;меню приложений. Ключ <code>--minimized</code> запускает сразу в&nbsp;трей, так делает автозапуск.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="section" id="help">
+  <div class="section__head">
+    <p class="label">Справка</p>
+    <h2>Клавиши, клики и&nbsp;файлы</h2>
+  </div>
+  <div class="section__body">
+    <dl class="rows">
+      <div><dt>Открыть или спрятать окно</dt><dd>клик по&nbsp;иконке в&nbsp;трее. Повторный запуск программы тоже открывает окно.</dd></div>
+      <div><dt>Спрятать окно</dt><dd><kbd>Esc</kbd>, крестик или клик мимо окна.</dd></div>
+      <div><dt>Выйти из&nbsp;программы</dt><dd><kbd>Ctrl</kbd>+<kbd>Q</kbd> или меню аккаунта за&nbsp;иконкой человека.</dd></div>
+      <div><dt>Подключиться к&nbsp;локации</dt><dd>двойной клик по&nbsp;строке, либо выделить строку и&nbsp;нажать «Подключиться».</dd></div>
+      <div><dt>Избранное</dt><dd>правая кнопка мыши по&nbsp;локации. Вкладка «Избранное» показывает только их.</dd></div>
+      <div><dt>Поиск и&nbsp;пинги</dt><dd>лупа открывает поиск, <kbd>Esc</kbd> закрывает. Стрелка рядом обновляет список и&nbsp;пинги.</dd></div>
+      <div><dt>Язык</dt><dd>переключатель RU / EN в&nbsp;заголовке окна.</dd></div>
+    </dl>
+    <h3>Файлы в&nbsp;домашней папке</h3>
+    <dl class="rows">
+      <div><dt><code>~/.config/adguard-gui-settings.json</code></dt><dd>язык</dd></div>
+      <div><dt><code>~/.config/adguard-gui-favorites.json</code></dt><dd>избранные локации</dd></div>
+      <div><dt><code>~/.config/adguard-locations-cache.json</code></dt><dd>список локаций для мгновенного старта</dd></div>
+      <div><dt><code>~/.config/autostart/adguard.desktop</code></dt><dd>автозапуск</dd></div>
+    </dl>
+    <h3>Ограничения</h3>
+    <ul class="plain">
+      <li><strong>Положение окна на&nbsp;Wayland.</strong> Wayland не&nbsp;сообщает программам, где их иконка в&nbsp;трее и&nbsp;где курсор. Поэтому окно открывается у&nbsp;правого края панели, там, где живут индикаторы во&nbsp;всех оболочках. На&nbsp;X11 окно встаёт под курсор.</li>
+      <li>Только Linux. На&nbsp;macOS и&nbsp;Windows у&nbsp;AdGuard есть собственные приложения.</li>
+      <li>Первое подключение может попросить настроить права для туннеля. Сделайте это один раз в&nbsp;терминале: <code>adguardvpn-cli connect</code>.</li>
+      <li>Автоподключение до&nbsp;входа в&nbsp;систему делается системным юнитом, пример лежит в&nbsp;<code>systemd/</code> репозитория. Окно увидит такое подключение как любое другое.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <p>AdGuard и&nbsp;AdGuard VPN — товарные знаки AdGuard Software Ltd. Этот проект независимый, с&nbsp;AdGuard не&nbsp;связан и&nbsp;не&nbsp;меняет работу VPN: он только показывает и&nbsp;запускает команды официального CLI.</p>
+  <p><a href="https://github.com/iResultMan/adguardvpn-Linux-gui">Исходный код на&nbsp;GitHub</a></p>
+</footer>
+
+</body>
+</html>
