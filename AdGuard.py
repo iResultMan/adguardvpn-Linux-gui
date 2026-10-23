@@ -6,6 +6,7 @@ import json
 import re
 import queue
 import shutil
+import socket
 import tempfile
 import webbrowser
 from urllib.request import Request, urlopen
@@ -15,8 +16,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLineEdit, QStackedWidget, QDialog, QMessageBox, QCheckBox,
                              QStyleOptionButton, QStyle)
 from PyQt5.QtGui import QIcon, QFont, QColor, QPainter, QCursor, QDesktopServices, QFontMetrics
-from PyQt5.QtCore import Qt, QTimer, QSize, QPoint, QThread, pyqtSignal, QUrl, QEvent, QRectF, QRect
-from PyQt5.QtNetwork import QLocalServer, QLocalSocket
+from PyQt5.QtCore import Qt, QTimer, QSize, QPoint, QThread, pyqtSignal, QUrl, QEvent, QRectF, QRect, QSocketNotifier
 
 # Resolve paths relative to this file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,7 +30,6 @@ FAVORITES_FILE = os.path.expanduser("~/.config/adguard-gui-favorites.json")
 LOCATIONS_CACHE_FILE = os.path.expanduser("~/.config/adguard-locations-cache.json")
 SETTINGS_FILE = os.path.expanduser("~/.config/adguard-gui-settings.json")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/adguard.desktop")
-IPC_SERVER_NAME = "adguard_vpn_gui_ipc"
 CLI_NAME = "adguardvpn-cli"
 CLI_DEFAULT_PATH = "/opt/adguardvpn_cli/adguardvpn-cli"
 CLI_PROJECT_URL = "https://github.com/AdguardTeam/AdGuardVPNCLI"
@@ -253,15 +252,25 @@ STRINGS = {
 }
 
 
+def ipc_address():
+    """Per-user Unix socket in Linux's abstract namespace: no file to clean
+    up, gone with the process. The plain socket module replaces a whole Qt
+    module (QtNetwork) that was loaded only for this."""
+    return "\0adguard-vpn-gui-%d" % os.getuid()
+
+
 def send_ipc_message(message="show"):
-    socket = QLocalSocket()
-    socket.connectToServer(IPC_SERVER_NAME)
-    if socket.waitForConnected(600):
-        socket.write(message.encode("utf-8") + b"\n")
-        socket.waitForBytesWritten(600)
-        socket.disconnectFromServer()
+    """Ask a running instance to show its window. True if one answered."""
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(0.6)
+    try:
+        client.connect(ipc_address())
+        client.sendall(message.encode("utf-8") + b"\n")
         return True
-    return False
+    except OSError:
+        return False
+    finally:
+        client.close()
 
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
@@ -892,6 +901,7 @@ class AdGuardVPNApp(QWidget):
         self.current_ip_str = ""
         self.refresh_in_progress = False
         self.raw_locations = []
+        self.locations_dirty = True  # list items exist only while the window is shown
         self.favorites = set()
         
         self.load_settings()
@@ -1074,19 +1084,31 @@ class AdGuardVPNApp(QWidget):
             self.on_locations_updated(self.raw_locations)
 
     def setup_ipc_server(self):
-        self.ipc_server = QLocalServer(self)
-        QLocalServer.removeServer(IPC_SERVER_NAME)
-        self.ipc_server.newConnection.connect(self.handle_ipc_connection)
-        self.ipc_server.listen(IPC_SERVER_NAME)
+        self.ipc_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.ipc_socket.setblocking(False)
+        try:
+            self.ipc_socket.bind(ipc_address())
+            self.ipc_socket.listen(4)
+        except OSError:
+            self.ipc_socket.close()
+            self.ipc_socket = None
+            return
+        self.ipc_notifier = QSocketNotifier(self.ipc_socket.fileno(), QSocketNotifier.Read, self)
+        self.ipc_notifier.activated.connect(self.handle_ipc_connection)
 
     def handle_ipc_connection(self):
-        client = self.ipc_server.nextPendingConnection()
-        if client:
-            client.waitForReadyRead(500)
-            msg = bytes(client.readAll()).decode("utf-8").strip()
-            if msg == "show" or not msg:
-                self.show_window()
-            client.disconnectFromServer()
+        try:
+            client, _ = self.ipc_socket.accept()
+        except OSError:
+            return
+        with client:
+            client.settimeout(0.5)
+            try:
+                msg = client.recv(64).decode("utf-8", "replace").strip()
+            except OSError:
+                msg = ""
+        if msg in ("", "show"):
+            self.show_window()
 
     def initUI(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -2176,6 +2198,19 @@ class AdGuardVPNApp(QWidget):
 
     def on_locations_updated(self, locations):
         self.raw_locations = locations
+        self.locations_dirty = True
+        if self.isVisible():
+            self.render_locations()
+        if self.connection_state == "connected" and self.current_location_name:
+            self.current_location_name = self.pretty_location(self.current_location_name)
+            self.render_status()
+
+    def render_locations(self):
+        """Build the list items from raw_locations. Only called while the
+        window is visible; hideEvent drops the items again, so a hidden tray
+        app keeps one copy of the locations (the plain dicts), not two."""
+        locations = self.raw_locations
+        self.locations_dirty = False
         self.locations_list.clear()
         parsed_items = []
         fav_count = 0
@@ -2229,31 +2264,13 @@ class AdGuardVPNApp(QWidget):
         if locations:
             self.loc_label.setText(f"{self.t('locations')} ({len(locations)})")
             self.filter_fav_btn.setText(f"{self.t('favorites')} ({fav_count})")
-        if self.connection_state == "connected" and self.current_location_name:
-            self.current_location_name = self.pretty_location(self.current_location_name)
-            self.render_status()
 
     def refresh_locations(self):
         self.refresh_in_progress = True
         self.refresh_btn.start_rotation()
         self.refresh_btn.setToolTip(self.t("refreshing_locations_tooltip"))
-        if hasattr(self, "raw_locations") and self.raw_locations:
-            self.locations_list.clear()
-            for loc in self.raw_locations:
-                country = loc.get("country", "")
-                city = loc.get("city", "")
-                iso = loc.get("iso", "")
-                identifier = city if city else country
-                display_title = f"{city}, {country}" if city and country else (city or country)
-                is_fav = identifier in self.favorites or iso in self.favorites
-                if self.filter_mode == "fav" and not is_fav:
-                    continue
-                star = "★ " if is_fav else "  "
-                item = QListWidgetItem(f"{star}{display_title}")
-                if is_fav:
-                    item.setForeground(QColor("#FFD54F"))
-                item.setData(Qt.UserRole, identifier)
-                self.locations_list.addItem(item)
+        if self.raw_locations:
+            self.render_locations()  # same list without the stale pings
         self.worker.request_action("refresh_locations")
 
     def restore_loc_label_text(self):
@@ -2530,8 +2547,17 @@ class AdGuardVPNApp(QWidget):
                         self.hide()
         super().changeEvent(event)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.locations_dirty and self.raw_locations:
+            self.render_locations()
+
     def hideEvent(self, event):
         self.hide_search()
+        # Free the list widgets while hidden; render_locations() rebuilds them
+        # on the next show from raw_locations.
+        self.locations_list.clear()
+        self.locations_dirty = True
         super().hideEvent(event)
 
     def quit_app(self):
@@ -2565,6 +2591,9 @@ if __name__ == '__main__':
     # when X is not available at all do we leave Qt on native Wayland.
     if not os.environ.get("QT_QPA_PLATFORM") and os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "xcb"
+    # Nothing here is drawn with OpenGL, yet Qt's xcb plugin would load Mesa
+    # and LLVM for it: about 8 MB of shared memory and 50 MB of RSS.
+    os.environ.setdefault("QT_XCB_GL_INTEGRATION", "none")
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 

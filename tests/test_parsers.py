@@ -134,6 +134,25 @@ class PopupPosition(unittest.TestCase):
         self.assertEqual(pos.x(), 8)
 
 
+class Ipc(unittest.TestCase):
+    def test_address_is_abstract_and_per_user(self):
+        addr = AdGuard.ipc_address()
+        self.assertTrue(addr.startswith("\0"))
+        self.assertIn(str(os.getuid()), addr)
+
+    def test_no_instance_answers(self):
+        # Nothing listens on a random name: the client must fail fast, not hang.
+        import time
+        real = AdGuard.ipc_address
+        AdGuard.ipc_address = lambda: "\0adguard-vpn-gui-test-nobody"
+        try:
+            t0 = time.monotonic()
+            self.assertFalse(AdGuard.send_ipc_message("show"))
+            self.assertLess(time.monotonic() - t0, 1.0)
+        finally:
+            AdGuard.ipc_address = real
+
+
 class InstallHelpers(unittest.TestCase):
     def test_terminal_picked_in_order(self):
         which = lambda exe: "/usr/bin/" + exe if exe in ("konsole", "xterm") else None
