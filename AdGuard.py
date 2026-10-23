@@ -6,6 +6,7 @@ import json
 import re
 import queue
 import shutil
+import tempfile
 import webbrowser
 from urllib.request import Request, urlopen
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -30,6 +31,12 @@ LOCATIONS_CACHE_FILE = os.path.expanduser("~/.config/adguard-locations-cache.jso
 SETTINGS_FILE = os.path.expanduser("~/.config/adguard-gui-settings.json")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/adguard.desktop")
 IPC_SERVER_NAME = "adguard_vpn_gui_ipc"
+CLI_NAME = "adguardvpn-cli"
+CLI_DEFAULT_PATH = "/opt/adguardvpn_cli/adguardvpn-cli"
+CLI_PROJECT_URL = "https://github.com/AdguardTeam/AdGuardVPNCLI"
+# The official one-liner from AdGuard's README, shown to the user verbatim.
+CLI_INSTALL_COMMAND = ("curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/"
+                       "scripts/release/install.sh | sh -s -- -v")
 
 SCROLLBAR_STYLE_HIDDEN = """
 QScrollBar:vertical {
@@ -83,6 +90,14 @@ STRINGS = {
         "connecting_pill": "● ПОДКЛЮЧЕНИЕ",
         "status_unknown": "Статус неизвестен",
         "cli_missing": "adguardvpn-cli не найден. Установите AdGuard VPN CLI.",
+        "cli_missing_title": "AdGuard VPN не установлен",
+        "cli_missing_desc": "Это окно работает поверх официальной консольной программы AdGuard VPN. Установите её командой ниже: откроется терминал, установщик задаст вопросы и попросит пароль администратора.",
+        "install_in_terminal": "Установить в терминале",
+        "copy_command": "Скопировать команду",
+        "cli_project_page": "Страница AdGuard VPN CLI",
+        "command_copied": "Команда скопирована. Вставьте её в терминал.",
+        "terminal_opened": "Терминал открыт. Когда установка закончится, окно переключится само.",
+        "no_terminal_found": "Не нашёл терминал. Скопируйте команду и выполните её вручную.",
         "not_protected": "Защита выключена",
         "connect": "Подключиться",
         "disconnect": "Отключиться",
@@ -159,6 +174,14 @@ STRINGS = {
         "connecting_pill": "● CONNECTING",
         "status_unknown": "Status unknown",
         "cli_missing": "adguardvpn-cli not found. Install AdGuard VPN CLI.",
+        "cli_missing_title": "AdGuard VPN is not installed",
+        "cli_missing_desc": "This window runs on top of the official AdGuard VPN command-line program. Install it with the command below: a terminal opens, the installer asks its questions and needs your administrator password.",
+        "install_in_terminal": "Install in a terminal",
+        "copy_command": "Copy command",
+        "cli_project_page": "AdGuard VPN CLI page",
+        "command_copied": "Command copied. Paste it into a terminal.",
+        "terminal_opened": "Terminal opened. The window switches by itself once the install finishes.",
+        "no_terminal_found": "No terminal emulator found. Copy the command and run it yourself.",
         "not_protected": "Not Protected",
         "connect": "Connect",
         "disconnect": "Disconnect",
@@ -248,6 +271,85 @@ def strip_ansi(text):
     return ANSI_RE.sub('', text or "")
 
 
+def find_cli():
+    """Path of adguardvpn-cli: PATH first, then the installer's default dir
+    (the installer offers the /usr/local/bin link as a question, so a user
+    who answered "no" still has a working binary in /opt)."""
+    found = shutil.which(CLI_NAME)
+    if found:
+        return found
+    if os.access(CLI_DEFAULT_PATH, os.X_OK):
+        return CLI_DEFAULT_PATH
+    return None
+
+
+TERMINALS = (
+    # (executable, args that precede the program to run)
+    ("x-terminal-emulator", ["-e"]),
+    ("ptyxis", ["--"]),
+    ("gnome-terminal", ["--"]),
+    ("konsole", ["-e"]),
+    ("xfce4-terminal", ["-x"]),
+    ("kgx", ["-e"]),
+    ("mate-terminal", ["-x"]),
+    ("lxterminal", ["-e"]),
+    ("alacritty", ["-e"]),
+    ("kitty", ["--"]),
+    ("xterm", ["-e"]),
+)
+
+
+def terminal_command_for(script_path, terminals=TERMINALS, which=shutil.which):
+    """Return argv that runs `bash script_path` in the first terminal found."""
+    for exe, prefix in terminals:
+        path = which(exe)
+        if path:
+            return [path] + prefix + ["bash", script_path]
+    return None
+
+
+def install_script_text(install_command=CLI_INSTALL_COMMAND):
+    """Shell script the install terminal runs: the official command, after
+    checking for curl (AdGuard's installer downloads the package with curl
+    itself, so a wget fallback would only fail later), and a pause so the
+    output stays readable. Nothing is answered for the user."""
+    return (
+        "#!/bin/bash\n"
+        "echo 'AdGuard VPN CLI install (official script):'\n"
+        f"echo '  {install_command}'\n"
+        "echo\n"
+        "if command -v curl >/dev/null 2>&1; then\n"
+        f"    {install_command}\n"
+        "else\n"
+        "    echo 'curl is not installed, and the AdGuard installer needs it.'\n"
+        "    echo 'Install curl first, then press the button again. For example:'\n"
+        "    echo '  Debian/Ubuntu: sudo apt install curl'\n"
+        "    echo '  Fedora:        sudo dnf install curl'\n"
+        "    echo '  Arch:          sudo pacman -S curl'\n"
+        "fi\n"
+        "echo\n"
+        "read -rp 'Press Enter to close this window...' _\n"
+    )
+
+
+def open_install_terminal():
+    """Open a terminal running the official installer. Returns True if a
+    terminal was launched."""
+    fd, script_path = tempfile.mkstemp(prefix="adguardvpn-install-", suffix=".sh")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(install_script_text())
+    os.chmod(script_path, 0o700)
+    argv = terminal_command_for(script_path)
+    if not argv:
+        return False
+    try:
+        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception:
+        return False
+    return True
+
+
 def run_cli_command(command, timeout=6):
     """Run adguardvpn-cli non-interactively and return (stdout+stderr, ok).
 
@@ -260,7 +362,7 @@ def run_cli_command(command, timeout=6):
         if command and command[0] == "connect" and "-y" not in command:
             command = command + ["-y"]
         result = subprocess.run(
-            ["adguardvpn-cli"] + command,
+            [find_cli() or CLI_NAME] + command,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -452,98 +554,34 @@ def compute_popup_position(window_size, avail_geo, anchor=None, margin=8):
     return QPoint(x, y)
 
 
-class MarqueeLabel(QWidget):
+class ElidedLabel(QLabel):
+    """One-line label that elides long text with an ellipsis and keeps the
+    full text in the tooltip. Static on purpose: a scrolling ticker kept the
+    process repainting while the window was open."""
     def __init__(self, text="", parent=None):
         super().__init__(parent)
-        self._text = str(text or "")
-        self._offset = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(50)
-        self._timer.timeout.connect(self._scroll_step)
-        self._pause_counter = 30
-        self._color = QColor("#94A3B8")
-        self._font = QFont("Ubuntu", 9)
+        self._full_text = ""
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setFixedHeight(20)
+        self.setStyleSheet("color: #94A3B8; font-size: 9pt;")
+        self.setText(text)
 
     def setText(self, text):
-        clean_text = str(text or "")
-        if self._text != clean_text:
-            self._text = clean_text
-            self._offset = 0
-            self._pause_counter = 40
-            self.update()
-            self._check_scroll()
+        self._full_text = str(text or "")
+        self.setToolTip(self._full_text)
+        self._apply_elide()
 
     def text(self):
-        return self._text
-
-    def setTextColor(self, color):
-        self._color = QColor(color)
-        self.update()
-
-    def setFont(self, font):
-        self._font = font
-        self.update()
-        self._check_scroll()
+        return self._full_text
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._check_scroll()
+        self._apply_elide()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._check_scroll()
-
-    def hideEvent(self, event):
-        # A hidden ticker must not keep the process repainting 20 times a second.
-        self._timer.stop()
-        super().hideEvent(event)
-
-    def _check_scroll(self):
-        fm = QFontMetrics(self._font)
-        text_w = fm.horizontalAdvance(self._text) if hasattr(fm, 'horizontalAdvance') else fm.width(self._text)
-        if text_w > self.width() and self.width() > 10 and self.isVisible():
-            if not self._timer.isActive():
-                self._timer.start()
-        else:
-            self._timer.stop()
-            self._offset = 0
-            self.update()
-
-    def _scroll_step(self):
-        if self._pause_counter > 0:
-            self._pause_counter -= 1
-            return
-        fm = QFontMetrics(self._font)
-        text_w = fm.horizontalAdvance(self._text) if hasattr(fm, 'horizontalAdvance') else fm.width(self._text)
-        if text_w <= self.width():
-            self._timer.stop()
-            self._offset = 0
-            self.update()
-            return
-        self._offset += 2
-        if self._offset > text_w + 35:
-            self._offset = 0
-            self._pause_counter = 30
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setClipRect(self.rect())
-        painter.setFont(self._font)
-        painter.setPen(self._color)
-        fm = QFontMetrics(self._font)
-        text_w = fm.horizontalAdvance(self._text) if hasattr(fm, 'horizontalAdvance') else fm.width(self._text)
-        h = self.height()
-        y = (h + fm.ascent() - fm.descent()) // 2
-
-        if text_w <= self.width():
-            painter.drawText(0, y, self._text)
-        else:
-            x = -self._offset
-            painter.drawText(x, y, self._text)
-            painter.drawText(x + text_w + 35, y, self._text)
+    def _apply_elide(self):
+        fm = QFontMetrics(self.font())
+        width = max(self.width() - 2, 10)
+        super().setText(fm.elidedText(self._full_text, Qt.ElideRight, width))
 
 
 class RotatingRefreshButton(QPushButton):
@@ -711,7 +749,7 @@ class VPNWorker(QThread):
             self.status_updated.emit("disconnected", "")
             return
         if not success and state == "unknown":
-            if shutil.which("adguardvpn-cli") is None:
+            if find_cli() is None:
                 self.status_updated.emit("cli_missing", "")
             else:
                 self.status_updated.emit("unknown", "")
@@ -732,7 +770,7 @@ class VPNWorker(QThread):
     def perform_browser_login(self):
         try:
             self.login_proc = subprocess.Popen(
-                ["adguardvpn-cli", "login"],
+                [find_cli() or CLI_NAME, "login"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -1012,6 +1050,13 @@ class AdGuardVPNApp(QWidget):
         if hasattr(self, "cancel_login_btn"):
             self.cancel_login_btn.setText(self.t("cancel"))
         
+        if hasattr(self, "no_cli_title"):
+            self.no_cli_title.setText(self.t("cli_missing_title"))
+            self.no_cli_desc.setText(self.t("cli_missing_desc"))
+            self.install_cli_btn.setText(self.t("install_in_terminal"))
+            self.copy_cli_command_btn.setText(self.t("copy_command"))
+            self.cli_page_btn.setText(self.t("cli_project_page"))
+
         # Update button text
         if hasattr(self, "toggle_btn"):
             self.update_btn_style(self.is_connected)
@@ -1207,7 +1252,7 @@ class AdGuardVPNApp(QWidget):
         self.ip_dot_label = QLabel("•")
         self.ip_dot_label.setStyleSheet("color: #64748B; font-size: 11px;")
         
-        self.ip_ticker = MarqueeLabel("")
+        self.ip_ticker = ElidedLabel("")
         
         self.external_ip_refresh_btn = QPushButton("↻")
         self.external_ip_refresh_btn.setCursor(Qt.PointingHandCursor)
@@ -1508,6 +1553,97 @@ class AdGuardVPNApp(QWidget):
         page_login_layout.addStretch()
         
         self.main_stack.addWidget(self.page_login)
+
+        # PAGE 2: CLI NOT INSTALLED
+        self.page_no_cli = QWidget()
+        no_cli_layout = QVBoxLayout(self.page_no_cli)
+        no_cli_layout.setContentsMargins(10, 20, 10, 20)
+        no_cli_layout.setSpacing(14)
+        no_cli_layout.setAlignment(Qt.AlignCenter)
+
+        no_cli_icon = QLabel()
+        no_cli_icon.setPixmap(QIcon(DISCONNECTED_ICON_PATH).pixmap(64, 64))
+        no_cli_icon.setAlignment(Qt.AlignCenter)
+        no_cli_layout.addWidget(no_cli_icon)
+
+        self.no_cli_title = QLabel("")
+        self.no_cli_title.setFont(QFont("Arial", 15, QFont.Bold))
+        self.no_cli_title.setAlignment(Qt.AlignCenter)
+        self.no_cli_title.setWordWrap(True)
+        no_cli_layout.addWidget(self.no_cli_title)
+
+        self.no_cli_desc = QLabel("")
+        self.no_cli_desc.setFont(QFont("Arial", 10))
+        self.no_cli_desc.setStyleSheet("color: #AAAAAA;")
+        self.no_cli_desc.setAlignment(Qt.AlignCenter)
+        self.no_cli_desc.setWordWrap(True)
+        no_cli_layout.addWidget(self.no_cli_desc)
+
+        self.no_cli_command = QLineEdit(CLI_INSTALL_COMMAND)
+        self.no_cli_command.setReadOnly(True)
+        self.no_cli_command.setCursorPosition(0)
+        self.no_cli_command.setStyleSheet("""
+            QLineEdit {
+                background-color: #252525;
+                color: #E2E8F0;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-family: monospace;
+                font-size: 10px;
+            }
+        """)
+        no_cli_layout.addWidget(self.no_cli_command)
+
+        self.install_cli_btn = QPushButton("")
+        self.install_cli_btn.setFont(QFont("Arial", 13, QFont.Bold))
+        self.install_cli_btn.setFixedHeight(48)
+        self.install_cli_btn.setCursor(Qt.PointingHandCursor)
+        self.install_cli_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 24px;
+            }
+            QPushButton:hover { background-color: #43A047; }
+            QPushButton:pressed { background-color: #388E3C; }
+        """)
+        self.install_cli_btn.clicked.connect(self.install_cli_in_terminal)
+        no_cli_layout.addWidget(self.install_cli_btn)
+
+        no_cli_buttons = QHBoxLayout()
+        secondary_style = """
+            QPushButton {
+                background-color: #2D2D2D;
+                color: #DDDDDD;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #383838; color: #FFFFFF; }
+        """
+        self.copy_cli_command_btn = QPushButton("")
+        self.copy_cli_command_btn.setCursor(Qt.PointingHandCursor)
+        self.copy_cli_command_btn.setStyleSheet(secondary_style)
+        self.copy_cli_command_btn.clicked.connect(self.copy_cli_install_command)
+        self.cli_page_btn = QPushButton("")
+        self.cli_page_btn.setCursor(Qt.PointingHandCursor)
+        self.cli_page_btn.setStyleSheet(secondary_style)
+        self.cli_page_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(CLI_PROJECT_URL)))
+        no_cli_buttons.addWidget(self.copy_cli_command_btn)
+        no_cli_buttons.addWidget(self.cli_page_btn)
+        no_cli_layout.addLayout(no_cli_buttons)
+
+        self.no_cli_status = QLabel("")
+        self.no_cli_status.setStyleSheet("color: #81C784; font-size: 11px;")
+        self.no_cli_status.setAlignment(Qt.AlignCenter)
+        self.no_cli_status.setWordWrap(True)
+        no_cli_layout.addWidget(self.no_cli_status)
+        no_cli_layout.addStretch()
+
+        self.main_stack.addWidget(self.page_no_cli)
         container_layout.addWidget(self.main_stack)
         main_layout.addWidget(self.container)
         
@@ -1796,8 +1932,28 @@ class AdGuardVPNApp(QWidget):
                 QPushButton:disabled { background-color: #555555; color: #888888; }
             """)
 
+    def install_cli_in_terminal(self):
+        if open_install_terminal():
+            self.no_cli_status.setText(self.t("terminal_opened"))
+        else:
+            self.no_cli_status.setText(self.t("no_terminal_found"))
+
+    def copy_cli_install_command(self):
+        QApplication.clipboard().setText(CLI_INSTALL_COMMAND)
+        self.no_cli_status.setText(self.t("command_copied"))
+
     def on_status_updated(self, state, location):
         """Mirror `adguardvpn-cli status` in the window and the tray."""
+        if state == "cli_missing":
+            if self.main_stack.currentIndex() != 2:
+                self.main_stack.setCurrentIndex(2)
+                self.no_cli_status.setText("")
+        elif self.main_stack.currentIndex() == 2:
+            # The CLI appeared (install finished): back to the normal pages;
+            # the next `license` answer decides between main and sign-in.
+            self.main_stack.setCurrentIndex(0 if self.is_logged_in else 1)
+            self.worker.request_action("refresh_auth")
+            self.worker.request_action("refresh_locations")
         prev_state = self.connection_state
         prev_location = self.current_location_name
         self.connection_state = state
@@ -2264,9 +2420,12 @@ class AdGuardVPNApp(QWidget):
             QTimer.singleShot(1500, self.refresh_external_ip)
 
     def on_tray_menu_triggered(self):
-        # Close the DBusMenu immediately so GNOME Shell doesn't render its popup
+        # Close the DBusMenu immediately so GNOME Shell doesn't render its popup.
+        # Map our window a moment later: while the shell's menu is still open
+        # the window manager refuses to focus a new window, and a window that
+        # never became active cannot notice losing focus (no auto-hide).
         QTimer.singleShot(0, self.tray_menu.close)
-        self.toggle_tray_window()
+        QTimer.singleShot(150, self.toggle_tray_window)
 
     def tray_activated(self, reason):
         self.toggle_tray_window()
@@ -2334,6 +2493,15 @@ class AdGuardVPNApp(QWidget):
         self.raise_()
         # Some window managers re-place a window right after map; re-assert once.
         QTimer.singleShot(50, lambda: self.move(pos))
+        QTimer.singleShot(300, self.ensure_active)
+
+    def ensure_active(self):
+        """Second activation request: the first one can be refused while the
+        panel's own popup is still closing. Being active is what makes the
+        later focus loss (click elsewhere) hide the window."""
+        if self.isVisible() and not self.isActiveWindow():
+            self.activateWindow()
+            self.raise_()
 
     def paintEvent(self, event):
         # Soft shadow around the card: a few translucent rounded strokes, no

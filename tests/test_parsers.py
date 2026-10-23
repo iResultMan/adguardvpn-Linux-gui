@@ -134,5 +134,24 @@ class PopupPosition(unittest.TestCase):
         self.assertEqual(pos.x(), 8)
 
 
+class InstallHelpers(unittest.TestCase):
+    def test_terminal_picked_in_order(self):
+        which = lambda exe: "/usr/bin/" + exe if exe in ("konsole", "xterm") else None
+        argv = AdGuard.terminal_command_for("/tmp/x.sh", which=which)
+        self.assertEqual(argv, ["/usr/bin/konsole", "-e", "bash", "/tmp/x.sh"])
+
+    def test_no_terminal(self):
+        self.assertIsNone(AdGuard.terminal_command_for("/tmp/x.sh", which=lambda exe: None))
+
+    def test_install_script_is_the_official_command_and_checks_curl(self):
+        script = AdGuard.install_script_text()
+        self.assertIn("curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/scripts/release/install.sh | sh -s -- -v", script)
+        self.assertIn("command -v curl", script)  # the installer itself needs curl
+        self.assertNotIn("-a y", script)  # the user answers the installer's questions
+
+    def test_find_cli_falls_back_to_opt(self):
+        self.assertIn(AdGuard.find_cli(), (None, AdGuard.CLI_DEFAULT_PATH, "/usr/local/bin/adguardvpn-cli", "/usr/bin/adguardvpn-cli"))
+
+
 if __name__ == "__main__":
     unittest.main()

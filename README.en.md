@@ -75,6 +75,12 @@ venv/bin/python AdGuard.py
 
 `--minimized` starts straight into the tray (this is what autostart does).
 
+If `adguardvpn-cli` is not installed, the window says so and shows the
+official install command. "Install in a terminal" opens a terminal with that
+command: you answer the installer's questions and type the administrator
+password yourself, nothing happens behind the terminal's back. When the
+install finishes, the window switches to the sign-in page.
+
 **GNOME.** GNOME Shell has no tray; install the AppIndicator extension,
 package `gnome-shell-extension-appindicator` on Ubuntu, Debian and Fedora.
 Without a tray the window is simply shown on start.
