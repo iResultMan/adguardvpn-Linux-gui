@@ -1,0 +1,19 @@
+[package]
+name = "adguardvpn-tray"
+version = "2.0.0"
+edition = "2021"
+description = "Tray daemon for AdGuard VPN CLI: icon, status, connect/disconnect, opens the settings window"
+license = "MIT"
+
+[dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+libc = "0.2"
+png = "0.18"
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -10,8 +10,6 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from PyQt5.QtCore import QRect, QSize, QPoint  # noqa: E402
-
 import AdGuard  # noqa: E402
 
 STATUS_CONNECTED = (
@@ -105,35 +103,6 @@ class ExclusionsParsing(unittest.TestCase):
         self.assertEqual(AdGuard.split_exclusions_input("   "), [])
 
 
-class PopupPosition(unittest.TestCase):
-    SIZE = QSize(360, 580)
-
-    def test_gnome_top_bar_without_anchor(self):
-        avail = QRect(77, 32, 2483, 1408)  # top bar 32px + left dock 77px
-        pos = AdGuard.compute_popup_position(self.SIZE, avail, None)
-        self.assertEqual(pos, QPoint(2559 - 360 - 8, 32 + 4))  # right() is inclusive in Qt
-
-    def test_bottom_panel_still_opens_at_the_top(self):
-        avail = QRect(0, 0, 2560, 1400)  # KDE-style 40px bottom panel
-        pos = AdGuard.compute_popup_position(self.SIZE, avail, None)
-        self.assertEqual(pos, QPoint(2559 - 360 - 8, 4))
-
-    def test_anchor_centres_under_icon(self):
-        avail = QRect(0, 32, 2560, 1408)
-        pos = AdGuard.compute_popup_position(self.SIZE, avail, QPoint(2300, 16))
-        self.assertEqual(pos, QPoint(2300 - 180, 36))
-
-    def test_anchor_near_right_edge_is_clamped(self):
-        avail = QRect(0, 32, 2560, 1408)
-        pos = AdGuard.compute_popup_position(self.SIZE, avail, QPoint(2550, 16))
-        self.assertEqual(pos.x(), 2559 - 360 - 8)
-
-    def test_anchor_near_left_edge_is_clamped(self):
-        avail = QRect(0, 32, 2560, 1408)
-        pos = AdGuard.compute_popup_position(self.SIZE, avail, QPoint(20, 16))
-        self.assertEqual(pos.x(), 8)
-
-
 class Ipc(unittest.TestCase):
     def test_address_is_abstract_and_per_user(self):
         addr = AdGuard.ipc_address()
@@ -167,6 +136,10 @@ class InstallHelpers(unittest.TestCase):
         self.assertIn("curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/scripts/release/install.sh | sh -s -- -v", script)
         self.assertIn("command -v curl", script)  # the installer itself needs curl
         self.assertNotIn("-a y", script)  # the user answers the installer's questions
+
+    def test_autostart_launches_daemon_or_window(self):
+        line = AdGuard.autostart_exec_line()
+        self.assertTrue(line.endswith("adguardvpn-tray") or line.endswith("AdGuard.py"))
 
     def test_find_cli_falls_back_to_opt(self):
         self.assertIn(AdGuard.find_cli(), (None, AdGuard.CLI_DEFAULT_PATH, "/usr/local/bin/adguardvpn-cli", "/usr/bin/adguardvpn-cli"))

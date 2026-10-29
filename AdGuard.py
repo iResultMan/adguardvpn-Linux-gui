@@ -1,3 +1,9 @@
+"""AdGuard VPN GUI: the settings window.
+
+Runs as its own process, started from the tray daemon (daemon/) or from the
+application menu, and exits when closed. Everything here is a view over
+`adguardvpn-cli`; the daemon keeps the icon in the tray.
+"""
 import sys
 import os
 import subprocess
@@ -11,11 +17,11 @@ import tempfile
 import webbrowser
 from urllib.request import Request, urlopen
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QLabel, QListWidget, QSystemTrayIcon, QMenu, QAction, 
+                             QPushButton, QLabel, QListWidget, QMenu, QAction, 
                              QFrame, QListWidgetItem, QSizePolicy, 
                              QLineEdit, QStackedWidget, QDialog, QMessageBox, QCheckBox,
                              QStyleOptionButton, QStyle)
-from PyQt5.QtGui import QIcon, QFont, QColor, QPainter, QCursor, QDesktopServices, QFontMetrics
+from PyQt5.QtGui import QIcon, QFont, QColor, QPainter, QDesktopServices, QFontMetrics
 from PyQt5.QtCore import Qt, QTimer, QSize, QPoint, QThread, pyqtSignal, QUrl, QEvent, QRectF, QRect, QSocketNotifier
 
 # Resolve paths relative to this file
@@ -30,6 +36,10 @@ FAVORITES_FILE = os.path.expanduser("~/.config/adguard-gui-favorites.json")
 LOCATIONS_CACHE_FILE = os.path.expanduser("~/.config/adguard-locations-cache.json")
 SETTINGS_FILE = os.path.expanduser("~/.config/adguard-gui-settings.json")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/adguard.desktop")
+TRAY_BINARY_CANDIDATES = (
+    os.path.join(BASE_DIR, "bin", "adguardvpn-tray"),
+    os.path.join(BASE_DIR, "daemon", "target", "release", "adguardvpn-tray"),
+)
 CLI_NAME = "adguardvpn-cli"
 CLI_DEFAULT_PATH = "/opt/adguardvpn_cli/adguardvpn-cli"
 CLI_PROJECT_URL = "https://github.com/AdguardTeam/AdGuardVPNCLI"
@@ -132,7 +142,7 @@ STRINGS = {
         "starting_auth": "Запуск авторизации в браузере...",
         "auth_success": "Авторизация прошла успешно!",
         "auth_canceled": "Авторизация отменена или истекло время.",
-        "close_tooltip": "Скрыть в трей (Esc)",
+        "close_tooltip": "Закрыть окно (Esc)",
         "user_tier_premium": "Тариф: Premium",
         "user_tier_free": "Тариф: Бесплатный",
         "until": "до",
@@ -148,7 +158,7 @@ STRINGS = {
         "exclusions_dialog_info": "Трафик для этих доменов идет напрямую в обход VPN-туннеля:",
         "exclusions_mode_general": "Режим GENERAL: трафик этих доменов идёт напрямую, в обход VPN:",
         "exclusions_mode_selective": "Режим SELECTIVE: через VPN идёт только трафик этих доменов:",
-        "exclusions_input_placeholder": "Введите домен (например, example.com)",
+        "exclusions_input_placeholder": "Домен или перетащите файл со списком",
         "add": "Добавить",
         "remove": "Удалить",
         "refresh": "Обновить",
@@ -216,7 +226,7 @@ STRINGS = {
         "starting_auth": "Starting browser authorization...",
         "auth_success": "Signed in successfully!",
         "auth_canceled": "Authorization was canceled or timed out.",
-        "close_tooltip": "Hide to tray (Esc)",
+        "close_tooltip": "Close window (Esc)",
         "user_tier_premium": "Tier: Premium",
         "user_tier_free": "Tier: Free",
         "until": "until",
@@ -232,7 +242,7 @@ STRINGS = {
         "exclusions_dialog_info": "Traffic to these domains bypasses the VPN tunnel:",
         "exclusions_mode_general": "GENERAL mode: traffic to these domains bypasses the VPN:",
         "exclusions_mode_selective": "SELECTIVE mode: only traffic to these domains goes through the VPN:",
-        "exclusions_input_placeholder": "Enter domain name (e.g. example.com)",
+        "exclusions_input_placeholder": "Domain, or drop a file with a list",
         "add": "Add",
         "remove": "Remove",
         "refresh": "Refresh",
@@ -503,20 +513,34 @@ def is_system_autostart_enabled():
     return False
 
 
+def find_tray_binary():
+    for candidate in TRAY_BINARY_CANDIDATES:
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def autostart_exec_line():
+    """What autostart launches: the tray daemon; the window only as a fallback
+    when the daemon binary is not built or downloaded."""
+    tray = find_tray_binary()
+    if tray:
+        return tray
+    return f"{sys.executable} {os.path.join(BASE_DIR, 'AdGuard.py')}"
+
+
 def set_system_autostart_enabled(enabled):
     autostart_dir = os.path.expanduser("~/.config/autostart")
     os.makedirs(autostart_dir, exist_ok=True)
-    
-    app_path = os.path.join(BASE_DIR, "AdGuard.py")
-    python_path = sys.executable
+
     icon_path = APP_ICON_PATH
-    
+
     if enabled:
         content = f"""[Desktop Entry]
 Type=Application
-Name=AdGuard
-Comment=AdGuard VPN Client
-Exec={python_path} {app_path} --minimized
+Name=AdGuard VPN
+Comment=AdGuard VPN tray
+Exec={autostart_exec_line()}
 Icon={icon_path}
 Terminal=false
 Categories=Network;
@@ -531,36 +555,6 @@ Hidden=false
                 os.remove(AUTOSTART_FILE)
             except Exception:
                 pass
-
-
-def is_wayland_session():
-    """True when the desktop session is Wayland.
-
-    Under Wayland (also when Qt itself runs through XWayland) the pointer
-    position an app can read is stale: it is the last point the pointer was
-    seen over one of the app's own windows, not where the tray was clicked.
-    """
-    return (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
-            or bool(os.environ.get("WAYLAND_DISPLAY")))
-
-
-def compute_popup_position(window_size, avail_geo, anchor=None, margin=8):
-    """Return the top-left QPoint for the tray popup window.
-
-    The window always hangs from the top of the available screen area, i.e.
-    right under a top panel. Horizontally it is centred on `anchor` (the
-    tray icon or the click) when one is known, otherwise it hugs the right
-    end of the panel, where indicators live in every desktop.
-    """
-    w, h = window_size.width(), window_size.height()
-    if anchor is not None:
-        x = anchor.x() - w // 2
-    else:
-        x = avail_geo.right() - margin - w
-    y = avail_geo.top() + margin // 2
-    x = max(avail_geo.left() + margin, min(x, avail_geo.right() - w - margin))
-    y = min(y, max(avail_geo.top() + margin // 2, avail_geo.bottom() - h - margin // 2))
-    return QPoint(x, y)
 
 
 class ElidedLabel(QLabel):
@@ -591,6 +585,40 @@ class ElidedLabel(QLabel):
         fm = QFontMetrics(self.font())
         width = max(self.width() - 2, 10)
         super().setText(fm.elidedText(self._full_text, Qt.ElideRight, width))
+
+
+class DropListWidget(QListWidget):
+    """QListWidget that accepts dropped text or text files and hands the
+    domains found in them to a callback."""
+    def __init__(self, on_domains, parent=None):
+        super().__init__(parent)
+        self._on_domains = on_domains
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        text = ""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if path:
+                    try:
+                        with open(path, "r", encoding="utf-8", errors="replace") as f:
+                            text += f.read(1_000_000) + "\n"
+                    except OSError:
+                        continue
+        if not text and event.mimeData().hasText():
+            text = event.mimeData().text()
+        domains = [d for d in split_exclusions_input(text) if not d.startswith("#")]
+        if domains:
+            self._on_domains(domains)
+        event.acceptProposedAction()
 
 
 class RotatingRefreshButton(QPushButton):
@@ -881,7 +909,7 @@ class VPNWorker(QThread):
 
 
 class AdGuardVPNApp(QWidget):
-    def __init__(self, start_minimized=False):
+    def __init__(self):
         super().__init__()
         self.is_connected = False
         self.is_logged_in = True
@@ -892,7 +920,6 @@ class AdGuardVPNApp(QWidget):
         self.filter_mode = "all"
         self.exclusions_count = 0
         self.current_lang = "ru"
-        self.last_anchor = None
         self.connection_state = "unknown"
         self.current_location_name = ""
         self.action_pending = False  # a connect/disconnect is queued or running
@@ -925,10 +952,7 @@ class AdGuardVPNApp(QWidget):
         self.worker.external_ip_updated.connect(self.on_external_ip_updated)
         self.worker.start()
 
-        # Without a tray (e.g. GNOME without the AppIndicator extension) a
-        # minimized start would leave no way to reach the window: show it.
-        if not start_minimized or not QSystemTrayIcon.isSystemTrayAvailable():
-            QTimer.singleShot(100, self.show_window)
+        QTimer.singleShot(0, self.show_window)
 
     def t(self, key, **kwargs):
         lang_dict = STRINGS.get(self.current_lang, STRINGS["ru"])
@@ -940,11 +964,15 @@ class AdGuardVPNApp(QWidget):
     def load_settings(self):
         default_lang = "ru" if os.environ.get("LANG", "").lower().startswith("ru") else "en"
         self.current_lang = default_lang
+        self.saved_window_pos = None
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                     settings = json.load(f)
                     self.current_lang = settings.get("lang", default_lang)
+                    pos = settings.get("window_pos")
+                    if isinstance(pos, list) and len(pos) == 2:
+                        self.saved_window_pos = (int(pos[0]), int(pos[1]))
             except Exception:
                 pass
 
@@ -952,7 +980,8 @@ class AdGuardVPNApp(QWidget):
         try:
             settings = {
                 "lang": self.current_lang,
-                "autostart": is_system_autostart_enabled()
+                "autostart": is_system_autostart_enabled(),
+                "window_pos": list(self.saved_window_pos) if self.saved_window_pos else None,
             }
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False)
@@ -1112,21 +1141,22 @@ class AdGuardVPNApp(QWidget):
             self.show_window()
 
     def initUI(self):
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowTitle("AdGuard VPN")
         self.setWindowIcon(QIcon(APP_ICON_PATH))
         self.setFixedSize(360, 580)
-        
+        # Scoped to this widget by object name: a bare "background-color"
+        # would cascade into every child label.
+        self.setObjectName("root")
+        self.setStyleSheet("QWidget#root { background-color: #1A1A1A; }")
+
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
         self.container = QFrame(self)
         self.container.setObjectName("container")
         self.container.setStyleSheet("""
             QFrame#container {
                 background-color: #1A1A1A;
-                border-radius: 14px;
-                border: 1px solid #333333;
             }
             QLabel {
                 color: #FFFFFF;
@@ -1206,7 +1236,7 @@ class AdGuardVPNApp(QWidget):
             }
             QPushButton:hover { background-color: #333333; color: #FFFFFF; }
         """)
-        self.close_btn.clicked.connect(self.hide)
+        self.close_btn.clicked.connect(self.close)
         top_bar.addWidget(self.close_btn)
         container_layout.addLayout(top_bar)
 
@@ -1670,20 +1700,6 @@ class AdGuardVPNApp(QWidget):
         container_layout.addWidget(self.main_stack)
         main_layout.addWidget(self.container)
         
-        # System Tray Icon setup (Direct 1-click toggle on Ubuntu GNOME)
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(QIcon(DISCONNECTED_ICON_PATH))
-        self.tray_icon.setToolTip("AdGuard VPN")
-        
-        # Intercept AppIndicator single-click via aboutToShow signal
-        self.tray_menu = QMenu(self)
-        self.tray_menu.addAction("")
-        self.tray_menu.aboutToShow.connect(self.on_tray_menu_triggered)
-        self.tray_icon.setContextMenu(self.tray_menu)
-
-        self.tray_icon.activated.connect(self.tray_activated)
-        self.tray_icon.show()
-
     def on_autostart_toggled(self, checked):
         set_system_autostart_enabled(checked)
         self.save_settings()
@@ -1880,7 +1896,7 @@ class AdGuardVPNApp(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            self.hide()
+            self.close()
             return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Q:
             self.quit_app()
@@ -2029,7 +2045,6 @@ class AdGuardVPNApp(QWidget):
                 f"{ping_html}"
                 f"</div>"
             )
-            self.tray_icon.setToolTip(self.t("tray_tooltip_connected", location=loc))
             self.toggle_btn.setEnabled(True)
         elif state == "connecting":
             display_text = (
@@ -2038,7 +2053,6 @@ class AdGuardVPNApp(QWidget):
                 f"<span style='font-size: 15pt; color: #FFFFFF; font-weight: bold;'>{loc or self.t('connecting')}</span>"
                 f"</div>"
             )
-            self.tray_icon.setToolTip(f"AdGuard VPN: {self.t('connecting')}")
             self.toggle_btn.setEnabled(False)
         elif state == "disconnected":
             display_text = (
@@ -2047,21 +2061,18 @@ class AdGuardVPNApp(QWidget):
                 f"<span style='font-size: 15pt; color: #FFFFFF; font-weight: bold;'>{self.t('not_protected')}</span>"
                 f"</div>"
             )
-            self.tray_icon.setToolTip(self.t("tray_tooltip_disconnected"))
             self.toggle_btn.setEnabled(True)
         elif state == "cli_missing":
             display_text = (
                 f"<div style='text-align: center;'>"
                 f"<span style='font-size: 11pt; color: #FF8A80; font-weight: bold;'>{self.t('cli_missing')}</span></div>"
             )
-            self.tray_icon.setToolTip(f"AdGuard VPN: {self.t('cli_missing')}")
             self.toggle_btn.setEnabled(False)
         else:
             display_text = (
                 f"<div style='text-align: center;'>"
                 f"<span style='font-size: 13pt; color: #FFFFFF;'>{self.t('status_unknown')}</span></div>"
             )
-            self.tray_icon.setToolTip(f"AdGuard VPN: {self.t('status_unknown')}")
             self.toggle_btn.setEnabled(True)
 
         self.status_label.setText(display_text)
@@ -2071,8 +2082,6 @@ class AdGuardVPNApp(QWidget):
             # click of a double click would otherwise undo the first one.
             self.toggle_btn.setEnabled(False)
             self.toggle_btn.setText(self.t("disconnecting") if self.is_connected else self.t("connecting"))
-        icon_path = CONNECTED_ICON_PATH if self.is_connected else DISCONNECTED_ICON_PATH
-        self.tray_icon.setIcon(QIcon(icon_path))
 
     def show_ip_refreshing(self):
         if hasattr(self, "ip_click_btn"):
@@ -2323,7 +2332,7 @@ class AdGuardVPNApp(QWidget):
         self.exclusions_info.setStyleSheet("color: #AAAAAA; font-size: 11px;")
         layout.addWidget(self.exclusions_info)
 
-        self.exclusions_list = QListWidget()
+        self.exclusions_list = DropListWidget(self.add_exclusions_list)
         layout.addWidget(self.exclusions_list)
 
         self.exclusions_status = QLabel(self.t("exclusions_loading"))
@@ -2401,6 +2410,11 @@ class AdGuardVPNApp(QWidget):
         if exclusions:
             self.worker.request_action(f"add_exclusions:{exclusions}")
 
+    def add_exclusions_list(self, domains):
+        """Domains dropped onto the list (from a file or selected text)."""
+        self.exclusions_status.setText(self.t("exclusions_updating"))
+        self.worker.request_action("add_exclusions:" + " ".join(domains))
+
     def remove_selected_exclusion(self):
         item = self.exclusions_list.currentItem()
         if item:
@@ -2450,134 +2464,33 @@ class AdGuardVPNApp(QWidget):
         if action == "connect":
             QTimer.singleShot(1500, self.refresh_external_ip)
 
-    def on_tray_menu_triggered(self):
-        # Close the DBusMenu immediately so GNOME Shell doesn't render its popup.
-        # Map our window a moment later: while the shell's menu is still open
-        # the window manager refuses to focus a new window, and a window that
-        # never became active cannot notice losing focus (no auto-hide).
-        QTimer.singleShot(0, self.tray_menu.close)
-        QTimer.singleShot(150, self.toggle_tray_window)
-
-    def tray_activated(self, reason):
-        self.toggle_tray_window()
-
-    def toggle_tray_window(self):
-        now = time.time()
-
-        # Debounce rapid activations
-        if now - getattr(self, "_last_tray_toggle_time", 0) < 0.25:
-            return
-
-        # If window just closed due to losing focus when clicking the tray icon, do not re-open
-        if now - getattr(self, "_last_focus_lost_time", 0) < 0.25:
-            return
-
-        self._last_tray_toggle_time = now
-
-        if self.isVisible():
-            self.hide()
-        else:
-            self.show_window(anchor=self.tray_anchor())
-
-    def tray_anchor(self):
-        """Best available guess of where the tray icon is, or None.
-
-        1. XEmbed trays (Xfce, MATE, LXQt on X11) report the icon rectangle.
-        2. On a native X11 session the pointer sits on the icon when it is
-           clicked, so the cursor position is a good anchor.
-        3. On Wayland (even through XWayland) neither is known: StatusNotifier
-           hosts pass the click position over D-Bus, but Qt drops it, and the
-           pointer position an X client sees is stale. Return None and let
-           compute_popup_position() fall back to the panel's right end.
-        """
-        geo = self.tray_icon.geometry()
-        if geo.isValid() and not geo.isEmpty():
-            return geo.center()
-        if not is_wayland_session():
-            pos = QCursor.pos()
-            if pos.x() > 0 or pos.y() > 0:
-                return pos
-        return None
-
-    def show_window(self, anchor=None):
-        if anchor is None:
-            anchor = self.last_anchor
-        else:
-            self.last_anchor = anchor
-
-        screen = None
-        if anchor is not None:
-            screen = QApplication.screenAt(anchor)
-        if screen is None and not is_wayland_session():
-            screen = QApplication.screenAt(QCursor.pos())
-        if screen is None:
-            screen = QApplication.primaryScreen()
-
-        pos = compute_popup_position(self.size(), screen.availableGeometry(), anchor)
-
-        self._is_active = False
-        self._just_shown_time = time.time()
-
-        self.move(pos)
+    def show_window(self):
+        # Reopen where the user last left the window (e.g. dragged under the
+        # tray icon). Honoured on X11 and XWayland; native Wayland ignores it.
+        if self.saved_window_pos:
+            pos = QPoint(*self.saved_window_pos)
+            for screen in QApplication.screens():
+                if screen.availableGeometry().contains(pos):
+                    self.move(pos)
+                    break
         self.show()
         self.activateWindow()
         self.raise_()
-        # Some window managers re-place a window right after map; re-assert once.
-        QTimer.singleShot(50, lambda: self.move(pos))
-        QTimer.singleShot(300, self.ensure_active)
-
-    def ensure_active(self):
-        """Second activation request: the first one can be refused while the
-        panel's own popup is still closing. Being active is what makes the
-        later focus loss (click elsewhere) hide the window."""
-        if self.isVisible() and not self.isActiveWindow():
-            self.activateWindow()
-            self.raise_()
-
-    def paintEvent(self, event):
-        # Soft shadow around the card: a few translucent rounded strokes, no
-        # blur effect (QGraphicsDropShadowEffect re-rendered the whole card on
-        # every repaint and cost ~30% of a core while the ticker scrolled).
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(Qt.NoBrush)
-        card = self.container.geometry()
-        for i in range(8, 0, -1):
-            painter.setPen(QColor(0, 0, 0, 10 + (8 - i) * 6))
-            rect = QRectF(card).adjusted(-i, -i + 2, i, i + 2)
-            painter.drawRoundedRect(rect, 14 + i, 14 + i)
-        super().paintEvent(event)
-
-    def changeEvent(self, event):
-        if event.type() == event.ActivationChange:
-            now = time.time()
-            if self.isActiveWindow():
-                self._is_active = True
-            elif getattr(self, "_is_active", False):
-                self._is_active = False
-                self._last_focus_lost_time = now
-                if now - getattr(self, "_just_shown_time", 0) > 0.3:
-                    if not (QApplication.activeModalWidget() or QApplication.activePopupWidget() or getattr(self, "exclusions_dialog", None)):
-                        self.hide()
-        super().changeEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
         if self.locations_dirty and self.raw_locations:
             self.render_locations()
 
-    def hideEvent(self, event):
-        self.hide_search()
-        # Free the list widgets while hidden; render_locations() rebuilds them
-        # on the next show from raw_locations.
-        self.locations_list.clear()
-        self.locations_dirty = True
-        super().hideEvent(event)
-
-    def quit_app(self):
+    def closeEvent(self, event):
+        self.saved_window_pos = (self.pos().x(), self.pos().y())
+        self.save_settings()
         self.worker.stop()
         self.worker.wait(3000)
-        QApplication.quit()
+        super().closeEvent(event)
+
+    def quit_app(self):
+        self.close()
 
 
 if __name__ == '__main__':
@@ -2597,12 +2510,8 @@ if __name__ == '__main__':
         send_ipc_message("show")
         sys.exit(0)
 
-    start_minimized = "--minimized" in sys.argv or "--tray" in sys.argv
-
-    # Wayland lets no application position its own top-level windows, so a
-    # tray popup would land wherever the compositor puts it (GNOME: screen
-    # centre). Through XWayland (xcb) move() works on every compositor. Only
-    # when X is not available at all do we leave Qt on native Wayland.
+    # Wayland lets no application choose or restore its window position;
+    # through XWayland (xcb) the remembered position works on every desktop.
     if not os.environ.get("QT_QPA_PLATFORM") and os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "xcb"
     # Nothing here is drawn with OpenGL, yet Qt's xcb plugin would load Mesa
@@ -2612,10 +2521,10 @@ if __name__ == '__main__':
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    app.setQuitOnLastWindowClosed(True)
     app.setApplicationName("AdGuard VPN")
     app.setDesktopFileName("adguard")
-    
-    gui = AdGuardVPNApp(start_minimized=start_minimized)
+
+    gui = AdGuardVPNApp()
     
     sys.exit(app.exec_())

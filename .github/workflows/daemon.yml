@@ -1,0 +1,64 @@
+name: daemon
+
+on:
+  push:
+    branches: [main]
+    paths: ["daemon/**", ".github/workflows/daemon.yml"]
+    tags: ["v*"]
+  pull_request:
+    paths: ["daemon/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup target add ${{ matrix.target }}
+      - name: aarch64 linker
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p ~/.cargo && printf '[target.aarch64-unknown-linux-musl]\nlinker = "aarch64-linux-gnu-gcc"\n' >> ~/.cargo/config.toml
+      - name: Test
+        if: matrix.arch == 'x86_64'
+        run: cargo test --release --manifest-path daemon/Cargo.toml
+      - name: Build (static musl binary)
+        run: cargo build --release --manifest-path daemon/Cargo.toml --target ${{ matrix.target }}
+      - name: Collect
+        run: |
+          cp daemon/target/${{ matrix.target }}/release/adguardvpn-tray adguardvpn-tray-${{ matrix.arch }}
+          file adguardvpn-tray-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adguardvpn-tray-${{ matrix.arch }}
+          path: adguardvpn-tray-${{ matrix.arch }}
+
+  release:
+    name: attach to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Checksums
+        run: sha256sum adguardvpn-tray-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            adguardvpn-tray-x86_64
+            adguardvpn-tray-aarch64
+            SHA256SUMS

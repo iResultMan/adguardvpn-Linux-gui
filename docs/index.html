@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AdGuard VPN GUI для Linux</title>
-<meta name="description" content="Окно в трее над официальным adguardvpn-cli: состояние VPN, город, пинг и IP всегда перед глазами. Подключение в один клик. Ничего своего, только команды CLI.">
+<meta name="description" content="Значок в трее и окно настроек над официальным adguardvpn-cli: состояние VPN, город, пинг и IP всегда перед глазами. Демон 4 МБ на Rust, подключение в один клик. Ничего своего, только команды CLI.">
 <meta property="og:title" content="AdGuard VPN GUI для Linux">
-<meta property="og:description" content="Графическая оболочка над официальной консольной программой AdGuard VPN. Статус раз в 2 секунды, подключение в один клик.">
+<meta property="og:description" content="Значок в трее на Rust (4 МБ) и окно настроек над официальной консольной программой AdGuard VPN. Подключение в один клик.">
 <meta property="og:image" content="screenshot.png">
 <link rel="icon" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -253,11 +253,11 @@
   <div class="hero__text">
     <p class="label in">Linux / трей / официальный adguardvpn-cli</p>
     <h1 class="in">AdGuard VPN<br>в&nbsp;трее Linux</h1>
-    <p class="hero__sub in">Окно над консольной программой AdGuard. Состояние, город, пинг и&nbsp;IP обновляются каждые 2&nbsp;секунды. Подключение в&nbsp;один клик, без терминала.</p>
+    <p class="hero__sub in">Значок в&nbsp;трее и&nbsp;окно настроек над консольной программой AdGuard. Демон на&nbsp;Rust занимает 4&nbsp;МБ, окно открывается по&nbsp;клику и&nbsp;закрывается без следа. Подключение в&nbsp;один клик, без терминала.</p>
     <div class="hero__cta in">
       <a class="btn btn--fill" href="https://github.com/iResultMan/adguardvpn-Linux-gui">Открыть репозиторий</a>
       <a class="btn btn--ghost" href="#install">Как установить</a>
-      <span class="hero__note">Python 3 и&nbsp;PyQt5. Один файл, одна зависимость.</span>
+      <span class="hero__note">Демон на&nbsp;Rust, окно на&nbsp;Python и&nbsp;PyQt5. По&nbsp;одному файлу на&nbsp;каждое.</span>
     </div>
   </div>
   <div class="hero__pane">
@@ -278,7 +278,7 @@
       <footer>автор проекта</footer>
     </blockquote>
     <p>На macOS и&nbsp;Windows у&nbsp;AdGuard есть приложения с&nbsp;окном. На&nbsp;Linux производитель даёт только консольную программу <code>adguardvpn-cli</code>: она надёжная, но&nbsp;чтобы увидеть, куда вы подключены, нужно набрать команду. Без VPN работать невозможно, и&nbsp;отвлекаться на&nbsp;проверку каждый раз тоже.</p>
-    <p>Эта оболочка решает одну задачу: иконка в&nbsp;трее показывает, поднят&nbsp;ли туннель, а&nbsp;окно по&nbsp;клику показывает город, пинг и&nbsp;публичный IP и&nbsp;даёт переключиться на&nbsp;другую локацию.</p>
+    <p>Эта оболочка решает одну задачу: значок в&nbsp;трее показывает, поднят&nbsp;ли туннель, меню по&nbsp;клику называет город и&nbsp;публичный IP и&nbsp;подключает или отключает, а&nbsp;окно настроек даёт всё остальное: список городов, избранное, исключения, аккаунт.</p>
   </div>
 </section>
 
@@ -289,7 +289,8 @@
   </div>
   <div class="section__body">
     <dl class="rows">
-      <div><dt>Состояние</dt><dd>подключено, отключено или подключается. Иконка в&nbsp;трее меняет цвет вместе с&nbsp;ним.</dd></div>
+      <div><dt>Меню значка</dt><dd>город, публичный IP, подключить или отключить, «Настройки». Рисует сама панель, работает в&nbsp;GNOME, KDE, Xfce одинаково.</dd></div>
+      <div><dt>Состояние</dt><dd>подключено, отключено или подключается. Значок в&nbsp;трее меняет цвет вместе с&nbsp;ним.</dd></div>
       <div><dt>Город и&nbsp;пинг</dt><dd>к&nbsp;какой локации подключён туннель и&nbsp;с&nbsp;какой задержкой.</dd></div>
       <div><dt>Публичный IP</dt><dd>адрес, который видят сайты, и&nbsp;его геолокация. Клик копирует IP в&nbsp;буфер.</dd></div>
       <div><dt>Локации</dt><dd>80 с&nbsp;лишним городов с&nbsp;пингами, сортировка по&nbsp;пингу, поиск, избранное. Двойной клик подключает.</dd></div>
@@ -303,15 +304,15 @@
 <section class="section" id="how">
   <div class="section__head">
     <p class="label">Устройство</p>
-    <h2>Ничего своего. Только команды производителя</h2>
+    <h2>Два процесса, ничего своего. Только команды производителя</h2>
   </div>
   <div class="section__body">
-    <p>Оболочка не&nbsp;содержит VPN-логики и&nbsp;не&nbsp;трогает сеть. Фоновый поток раз в&nbsp;2&nbsp;секунды запускает <code>adguardvpn-cli status</code> и&nbsp;показывает ответ. Каждая кнопка в&nbsp;окне запускает ту&nbsp;же команду, которую вы набрали&nbsp;бы в&nbsp;терминале.</p>
+    <p>Демон в&nbsp;трее написан на&nbsp;Rust: 2&nbsp;МБ на&nbsp;диске, 4&nbsp;МБ в&nbsp;памяти, в&nbsp;сеть не&nbsp;ходит. Таймера в&nbsp;нём нет: состояние перечитывается по&nbsp;событиям, когда CLI создаёт или удаляет свой <code>vpn.socket</code> и&nbsp;когда ядро поднимает туннель, а&nbsp;в&nbsp;простое демон не&nbsp;запускает ничего. Окно настроек на&nbsp;Python запускается из&nbsp;меню и&nbsp;после закрытия не&nbsp;занимает памяти. Каждая кнопка запускает ту&nbsp;же команду, которую вы набрали&nbsp;бы в&nbsp;терминале.</p>
     <div class="table-wrap" tabindex="0">
     <table>
       <thead><tr><th scope="col">Действие в&nbsp;окне</th><th scope="col">Что выполняется</th></tr></thead>
       <tbody>
-        <tr><td>Состояние и&nbsp;город, каждые 2&nbsp;с</td><td><code>adguardvpn-cli status</code></td></tr>
+        <tr><td>Состояние и&nbsp;город: демон по&nbsp;событиям, окно каждые 2&nbsp;с</td><td><code>adguardvpn-cli status</code></td></tr>
         <tr><td>Аккаунт и&nbsp;тариф, каждые 30&nbsp;с</td><td><code>adguardvpn-cli license</code></td></tr>
         <tr><td>Список локаций и&nbsp;пинги</td><td><code>adguardvpn-cli list-locations</code></td></tr>
         <tr><td>Кнопка «Подключиться»</td><td><code>adguardvpn-cli connect -y</code></td></tr>
@@ -322,7 +323,7 @@
       </tbody>
     </table>
     </div>
-    <p>Единственное исключение: публичный IP запрашивается по&nbsp;HTTPS у&nbsp;<code>ipwho.is</code>, при сбое у&nbsp;<code>ipapi.co</code>. CLI такой команды не&nbsp;даёт.</p>
+    <p>Единственное исключение: публичный IP запрашивается у&nbsp;<code>ipwho.is</code>, при сбое у&nbsp;<code>ipapi.co</code>. Демон делает это командой <code>curl</code>, окно по&nbsp;HTTPS из&nbsp;Python. CLI такой команды не&nbsp;даёт.</p>
     <p>Если VPN поднят другим способом, например системным юнитом при загрузке, окно покажет и&nbsp;это: оно читает состояние того&nbsp;же демона, что и&nbsp;CLI.</p>
   </div>
 </section>
@@ -333,7 +334,7 @@
     <h2>Три команды и&nbsp;одно расширение для&nbsp;GNOME</h2>
   </div>
   <div class="section__body">
-    <p>Нужны Linux, Python&nbsp;3.8 или новее с&nbsp;модулем <code>venv</code>, установленный и&nbsp;авторизованный <a href="https://github.com/AdguardTeam/AdGuardVPNCLI">AdGuard VPN CLI</a> и&nbsp;трей в&nbsp;панели.</p>
+    <p>Нужны Linux с&nbsp;треем, Python&nbsp;3.8 или новее с&nbsp;модулем <code>venv</code>, установленный и&nbsp;авторизованный <a href="https://github.com/AdguardTeam/AdGuardVPNCLI">AdGuard VPN CLI</a>. Демон собирается через <code>cargo</code>, а&nbsp;без него скачивается из&nbsp;релиза для x86_64 или aarch64 с&nbsp;проверкой контрольной суммы.</p>
     <ol class="steps">
       <li>
         <div>
@@ -341,7 +342,7 @@
           <pre tabindex="0"><code>git clone https://github.com/iResultMan/adguardvpn-Linux-gui.git
 cd adguardvpn-Linux-gui
 ./install.sh</code></pre>
-          <p>Скрипт создаёт <code>venv</code> с&nbsp;PyQt5, ярлык в&nbsp;меню приложений, иконки и&nbsp;автозапуск. Автозапуск потом выключается флажком в&nbsp;окне.</p>
+          <p>Скрипт кладёт демон в&nbsp;<code>bin/</code>, создаёт <code>venv</code> с&nbsp;PyQt5, ярлык окна в&nbsp;меню приложений и&nbsp;автозапуск демона. Автозапуск потом выключается флажком в&nbsp;окне.</p>
         </div>
       </li>
       <li>
@@ -353,8 +354,9 @@ cd adguardvpn-Linux-gui
       <li>
         <div>
           <h3>Запустить</h3>
-          <pre tabindex="0"><code>venv/bin/python AdGuard.py</code></pre>
-          <p>Или из&nbsp;меню приложений. Ключ <code>--minimized</code> запускает сразу в&nbsp;трей, так делает автозапуск.</p>
+          <pre tabindex="0"><code>bin/adguardvpn-tray &amp;
+venv/bin/python AdGuard.py</code></pre>
+          <p>Первая строка это значок в&nbsp;трее, вторая окно; обычно окно открывают из&nbsp;меню значка.</p>
           <p>Если <code>adguardvpn-cli</code> ещё не&nbsp;установлен, окно покажет официальную команду установки и&nbsp;по&nbsp;кнопке откроет терминал с&nbsp;ней. Вопросы установщика и&nbsp;пароль вы вводите сами, в&nbsp;обход терминала ничего не&nbsp;делается.</p>
         </div>
       </li>
@@ -369,24 +371,27 @@ cd adguardvpn-Linux-gui
   </div>
   <div class="section__body">
     <dl class="rows">
-      <div><dt>Открыть или спрятать окно</dt><dd>клик по&nbsp;иконке в&nbsp;трее. Повторный запуск программы тоже открывает окно.</dd></div>
-      <div><dt>Спрятать окно</dt><dd><kbd>Esc</kbd>, крестик или клик мимо окна.</dd></div>
-      <div><dt>Выйти из&nbsp;программы</dt><dd><kbd>Ctrl</kbd>+<kbd>Q</kbd> или меню аккаунта за&nbsp;иконкой человека.</dd></div>
+      <div><dt>Меню значка</dt><dd>левый или правый клик по&nbsp;значку в&nbsp;трее. В&nbsp;KDE левый клик сразу открывает окно.</dd></div>
+      <div><dt>Открыть окно</dt><dd>пункт «Настройки» в&nbsp;меню значка или ярлык в&nbsp;списке приложений.</dd></div>
+      <div><dt>Закрыть окно</dt><dd><kbd>Esc</kbd>, крестик или кнопка в&nbsp;заголовке. Память окна освобождается.</dd></div>
+      <div><dt>Выйти из&nbsp;демона</dt><dd>пункт «Выйти» в&nbsp;меню значка.</dd></div>
       <div><dt>Подключиться к&nbsp;локации</dt><dd>двойной клик по&nbsp;строке, либо выделить строку и&nbsp;нажать «Подключиться».</dd></div>
       <div><dt>Избранное</dt><dd>правая кнопка мыши по&nbsp;локации. Вкладка «Избранное» показывает только их.</dd></div>
       <div><dt>Поиск и&nbsp;пинги</dt><dd>лупа открывает поиск, <kbd>Esc</kbd> закрывает. Стрелка рядом обновляет список и&nbsp;пинги.</dd></div>
-      <div><dt>Язык</dt><dd>переключатель RU / EN в&nbsp;заголовке окна.</dd></div>
+      <div><dt>Исключения из&nbsp;файла</dt><dd>перетащите текстовый файл со&nbsp;списком доменов в&nbsp;окно исключений.</dd></div>
+      <div><dt>Язык</dt><dd>переключатель RU / EN в&nbsp;заголовке окна, демон подхватит его сам.</dd></div>
     </dl>
     <h3>Файлы в&nbsp;домашней папке</h3>
     <dl class="rows">
       <div><dt><code>~/.config/adguard-gui-settings.json</code></dt><dd>язык</dd></div>
       <div><dt><code>~/.config/adguard-gui-favorites.json</code></dt><dd>избранные локации</dd></div>
       <div><dt><code>~/.config/adguard-locations-cache.json</code></dt><dd>список локаций для мгновенного старта</dd></div>
-      <div><dt><code>~/.config/autostart/adguard.desktop</code></dt><dd>автозапуск</dd></div>
+      <div><dt><code>~/.config/autostart/adguard.desktop</code></dt><dd>автозапуск демона</dd></div>
     </dl>
     <h3>Ограничения</h3>
     <ul class="plain">
-      <li><strong>Положение окна на&nbsp;Wayland.</strong> Wayland не&nbsp;сообщает программам, где их иконка в&nbsp;трее и&nbsp;где курсор. Поэтому окно открывается у&nbsp;правого края панели, там, где живут индикаторы во&nbsp;всех оболочках. На&nbsp;X11 окно встаёт под курсор.</li>
+      <li><strong>Подпись с&nbsp;городом рядом со&nbsp;значком</strong> в&nbsp;панели пока не&nbsp;выводится. Состояние несут цвет значка, подсказка и&nbsp;первая строка меню.</li>
+      <li><strong>Демон это двоичный файл.</strong> Исходник лежит рядом, около 500 строк; файлы в&nbsp;релизах собирает GitHub Actions из&nbsp;этого исходника, установщик сверяет контрольную сумму, сетевых библиотек в&nbsp;коде нет.</li>
       <li>Только Linux. На&nbsp;macOS и&nbsp;Windows у&nbsp;AdGuard есть собственные приложения.</li>
       <li>Первое подключение может попросить настроить права для туннеля. Сделайте это один раз в&nbsp;терминале: <code>adguardvpn-cli connect</code>.</li>
       <li>Автоподключение до&nbsp;входа в&nbsp;систему делается системным юнитом, пример лежит в&nbsp;<code>systemd/</code> репозитория. Окно увидит такое подключение как любое другое.</li>
