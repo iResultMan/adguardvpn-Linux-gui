@@ -895,6 +895,7 @@ class AdGuardVPNApp(QWidget):
         self.last_anchor = None
         self.connection_state = "unknown"
         self.current_location_name = ""
+        self.action_pending = False  # a connect/disconnect is queued or running
         self.exclusions_mode = ""
         
         self.external_ip_refresh_in_progress = False
@@ -2065,6 +2066,11 @@ class AdGuardVPNApp(QWidget):
 
         self.status_label.setText(display_text)
         self.update_btn_style(self.is_connected)
+        if self.action_pending:
+            # The status poll must not re-arm the button mid-action: a second
+            # click of a double click would otherwise undo the first one.
+            self.toggle_btn.setEnabled(False)
+            self.toggle_btn.setText(self.t("disconnecting") if self.is_connected else self.t("connecting"))
         icon_path = CONNECTED_ICON_PATH if self.is_connected else DISCONNECTED_ICON_PATH
         self.tray_icon.setIcon(QIcon(icon_path))
 
@@ -2412,8 +2418,11 @@ class AdGuardVPNApp(QWidget):
             self.worker.request_action("clear_exclusions")
 
     def toggle_connection(self):
+        if self.action_pending:
+            return
+        self.action_pending = True
         self.toggle_btn.setEnabled(False)
-        self.toggle_btn.setText(self.t("working"))
+        self.toggle_btn.setText(self.t("disconnecting") if self.is_connected else self.t("connecting"))
         if self.is_connected:
             self.worker.request_action("disconnect")
         else:
@@ -2425,6 +2434,9 @@ class AdGuardVPNApp(QWidget):
                 self.worker.request_action("connect")
 
     def connect_to_location(self, item):
+        if self.action_pending:
+            return
+        self.action_pending = True
         self.toggle_btn.setEnabled(False)
         self.toggle_btn.setText(self.t("connecting"))
         self.show_ip_refreshing()
@@ -2433,6 +2445,8 @@ class AdGuardVPNApp(QWidget):
         self.hide_search()
 
     def on_action_finished(self, action):
+        self.action_pending = False
+        self.render_status()
         if action == "connect":
             QTimer.singleShot(1500, self.refresh_external_ip)
 
