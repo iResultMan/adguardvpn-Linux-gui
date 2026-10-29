@@ -7,7 +7,7 @@ of its own: every action runs the command you would otherwise type.
 
 [Русская версия](README.md)
 
-![AdGuard VPN GUI window: connected to Denver, list of locations with pings](docs/screenshot.png)
+![AdGuard VPN GUI settings window: connected to Denver, list of locations with pings](docs/screenshot.png)
 
 Project page: https://iresultman.github.io/adguardvpn-Linux-gui/
 
@@ -139,7 +139,9 @@ The daemon is a binary, and there are three ways to know what is in it:
 1. The source is `daemon/src/main.rs`, about 500 lines, a 15-minute read.
 2. Release files are built by GitHub Actions from that source
    (`.github/workflows/daemon.yml`) next to a `SHA256SUMS` the installer
-   checks. The same `cargo build --release` gives the same file locally.
+   checks the download against. Anyone who would rather not download builds
+   it themselves: `cargo build --release --manifest-path daemon/Cargo.toml`,
+   which is exactly what the installer does when it finds cargo.
 3. The daemon opens no network connections. Verifiable by reading the code:
    there is no networking library in it.
 

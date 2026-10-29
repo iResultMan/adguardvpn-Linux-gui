@@ -8,7 +8,7 @@
 
 [English version](README.en.md)
 
-![Окно AdGuard VPN GUI: подключено к Denver, список локаций с пингами](docs/screenshot.png)
+![Окно настроек AdGuard VPN GUI: подключено к Denver, список локаций с пингами](docs/screenshot.png)
 
 Страница проекта: https://iresultman.github.io/adguardvpn-Linux-gui/
 
@@ -139,8 +139,9 @@ venv/bin/python AdGuard.py
 1. Исходник в `daemon/src/main.rs`, около 500 строк, читается за 15 минут.
 2. Файлы в релизах собирает GitHub Actions из этого исходника
    (`.github/workflows/daemon.yml`), рядом лежит `SHA256SUMS`, установщик
-   сверяет сумму. Та же команда `cargo build --release` даёт тот же файл
-   локально.
+   сверяет сумму скачанного файла с ней. Кто не хочет скачивать, собирает
+   сам: `cargo build --release --manifest-path daemon/Cargo.toml`, именно
+   это делает установщик, когда находит cargo.
 3. Демон не открывает сетевых соединений. Проверяется чтением кода: в нём
    нет ни одной сетевой библиотеки.
 
